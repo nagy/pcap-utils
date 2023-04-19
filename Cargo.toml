@@ -1,0 +1,9 @@
+[package]
+name = "pcap_utils"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+etherparse = "0.13.0"
+pcap = "1.0.0"
+pyo3 = { version = "0.18.3", features = ["extension-module"] }
