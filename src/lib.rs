@@ -12,8 +12,6 @@ pub struct PacketOwned {
     pub data: Vec<u8>,
 }
 
-type Returned = (Vec<u8>, f64);
-
 /// Simple codec that tranform [`pcap::Packet`] into [`PacketOwned`]
 pub struct Codec();
 
@@ -46,10 +44,10 @@ impl MyIterator {
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Returned> {
+    fn __next__<'a>(mut slf: PyRefMut<'a, Self>, py: Python<'a>) -> Option<(&'a PyBytes, f64)> {
         slf.iter.next().map(|pkt| {
             let pkt = pkt.unwrap();
-            (pkt.data, pkt.time)
+            (PyBytes::new(py, &pkt.data), pkt.time)
         })
     }
 }
