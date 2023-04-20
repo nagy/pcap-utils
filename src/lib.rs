@@ -71,6 +71,34 @@ fn nth_packet_payload(input: String, nth: usize) -> Option<Vec<u8>> {
     })
 }
 
+fn packet_source_socket(data: &[u8]) -> Option<std::net::SocketAddr> {
+    let parsed = SlicedPacket::from_ethernet(data).ok()?;
+    let addr: std::net::IpAddr = match parsed.ip? {
+        InternetSlice::Ipv4(ref hdr, _) => hdr.source_addr().into(),
+        InternetSlice::Ipv6(ref hdr, _) => hdr.source_addr().into(),
+    };
+    let port = match parsed.transport? {
+        TransportSlice::Tcp(ref hdr) => hdr.source_port(),
+        TransportSlice::Udp(ref hdr) => hdr.source_port(),
+        _ => return None,
+    };
+    Some(std::net::SocketAddr::new(addr, port))
+}
+
+fn packet_destination_socket(data: &[u8]) -> Option<std::net::SocketAddr> {
+    let parsed = SlicedPacket::from_ethernet(data).ok()?;
+    let addr: std::net::IpAddr = match parsed.ip? {
+        InternetSlice::Ipv4(ref hdr, _) => hdr.destination_addr().into(),
+        InternetSlice::Ipv6(ref hdr, _) => hdr.destination_addr().into(),
+    };
+    let port = match parsed.transport? {
+        TransportSlice::Tcp(ref hdr) => hdr.destination_port(),
+        TransportSlice::Udp(ref hdr) => hdr.destination_port(),
+        _ => return None,
+    };
+    Some(std::net::SocketAddr::new(addr, port))
+}
+
 fn packet_source_addr(data: &[u8]) -> Option<std::net::Ipv4Addr> {
     match SlicedPacket::from_ethernet(data).unwrap().ip {
         Some(InternetSlice::Ipv4(ref hdr, _)) => Some(hdr.source_addr()),
@@ -135,6 +163,14 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         crate::write_function(input, output, list_of_keep)
     }
     #[pyfn(m)]
+    fn packet_source_socket(data: &[u8]) -> Option<String> {
+        crate::packet_source_socket(data).map(|x| x.to_string())
+    }
+    #[pyfn(m)]
+    fn packet_destination_socket(data: &[u8]) -> Option<String> {
+        crate::packet_destination_socket(data).map(|x| x.to_string())
+    }
+    #[pyfn(m)]
     fn packet_source_port(data: &[u8]) -> Option<u16> {
         crate::packet_source_port(data)
     }
@@ -143,12 +179,12 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         crate::packet_destination_port(data)
     }
     #[pyfn(m)]
-    fn packet_source_addr(data: &[u8]) -> Option<[u8; 4]> {
-        crate::packet_source_addr(data).map(|x| x.octets())
+    fn packet_source_addr(data: &[u8]) -> Option<String> {
+        crate::packet_source_addr(data).map(|x| x.to_string())
     }
     #[pyfn(m)]
-    fn packet_destination_addr(data: &[u8]) -> Option<[u8; 4]> {
-        crate::packet_destination_addr(data).map(|x| x.octets())
+    fn packet_destination_addr(data: &[u8]) -> Option<String> {
+        crate::packet_destination_addr(data).map(|x| x.to_string())
     }
     Ok(())
 }
@@ -171,5 +207,10 @@ mod tests {
         assert_eq!(saddr, [10, 0, 0, 5]);
         let daddr = packet_destination_addr(data).unwrap().octets();
         assert_eq!(daddr, [207, 46, 134, 94]);
+
+        let ssocket = packet_source_socket(data).unwrap();
+        assert_eq!(ssocket, "10.0.0.5:3267".parse().unwrap());
+        let dsocket = packet_destination_socket(data).unwrap();
+        assert_eq!(dsocket, "207.46.134.94:80".parse().unwrap());
     }
 }
