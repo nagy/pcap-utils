@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3::Python;
 
-/// Represents a owned packet
+/// Represents an owned packet
 #[derive(Debug, Clone, PartialEq)]
 pub struct PacketOwned {
     pub time: f64,
@@ -150,6 +150,28 @@ fn packet_tcp_rst(data: &[u8]) -> Option<bool> {
     }
 }
 
+fn packet_is_tcp(data: &[u8]) -> bool {
+    match SlicedPacket::from_ethernet(data).unwrap().transport {
+        Some(TransportSlice::Tcp(ref _hdr)) => true,
+        _ => false,
+    }
+}
+
+fn packet_is_udp(data: &[u8]) -> bool {
+    match SlicedPacket::from_ethernet(data).unwrap().transport {
+        Some(TransportSlice::Udp(ref _hdr)) => true,
+        _ => false,
+    }
+}
+
+fn packet_is_icmp(data: &[u8]) -> bool {
+    match SlicedPacket::from_ethernet(data).unwrap().transport {
+        Some(TransportSlice::Icmpv4(ref _hdr)) => true,
+        Some(TransportSlice::Icmpv6(ref _hdr)) => true,
+        _ => false,
+    }
+}
+
 /// Write out the resulting pcap file.
 fn write_function(input: String, output: String, list_of_keep: Vec<bool>) {
     let mut cap = Capture::from_file(input).unwrap();
@@ -216,6 +238,18 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     #[pyfn(m)]
     fn packet_tcp_rst(data: &[u8]) -> Option<bool> {
         crate::packet_tcp_rst(data)
+    }
+    #[pyfn(m)]
+    fn packet_is_tcp(data: &[u8]) -> bool {
+        crate::packet_is_tcp(data)
+    }
+    #[pyfn(m)]
+    fn packet_is_udp(data: &[u8]) -> bool {
+        crate::packet_is_udp(data)
+    }
+    #[pyfn(m)]
+    fn packet_is_icmp(data: &[u8]) -> bool {
+        crate::packet_is_icmp(data)
     }
     Ok(())
 }
