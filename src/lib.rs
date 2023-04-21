@@ -129,6 +129,27 @@ fn packet_destination_port(data: &[u8]) -> Option<u16> {
     }
 }
 
+fn packet_tcp_syn(data: &[u8]) -> Option<bool> {
+    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+        TransportSlice::Tcp(ref hdr) => hdr.syn().into(),
+        _ => None,
+    }
+}
+
+fn packet_tcp_fin(data: &[u8]) -> Option<bool> {
+    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+        TransportSlice::Tcp(ref hdr) => hdr.fin().into(),
+        _ => None,
+    }
+}
+
+fn packet_tcp_rst(data: &[u8]) -> Option<bool> {
+    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+        TransportSlice::Tcp(ref hdr) => hdr.rst().into(),
+        _ => None,
+    }
+}
+
 /// Write out the resulting pcap file.
 fn write_function(input: String, output: String, list_of_keep: Vec<bool>) {
     let mut cap = Capture::from_file(input).unwrap();
@@ -183,6 +204,18 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     #[pyfn(m)]
     fn packet_destination_addr(data: &[u8]) -> Option<String> {
         crate::packet_destination_addr(data).map(|x| x.to_string())
+    }
+    #[pyfn(m)]
+    fn packet_tcp_syn(data: &[u8]) -> Option<bool> {
+        crate::packet_tcp_syn(data)
+    }
+    #[pyfn(m)]
+    fn packet_tcp_fin(data: &[u8]) -> Option<bool> {
+        crate::packet_tcp_fin(data)
+    }
+    #[pyfn(m)]
+    fn packet_tcp_rst(data: &[u8]) -> Option<bool> {
+        crate::packet_tcp_rst(data)
     }
     Ok(())
 }
