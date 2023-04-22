@@ -29,13 +29,13 @@ impl TcpInfoTuple {
         }
     }
     #[cfg(test)]
-    fn synned(&self) -> Self {
+    fn synacked(&self) -> Self {
         Self {
             ssocket: self.ssocket,
             dsocket: self.dsocket,
             syn: true,
             finrst: self.finrst,
-            ack: self.ack,
+            ack: true,
         }
     }
 }
@@ -59,7 +59,7 @@ impl TcpSegmenter {
     pub fn num_open(&self) -> usize {
         let mut count = 0;
         for v in &self.state {
-            if v.is_some() {
+            if !v.as_ref().unwrap().finrst {
                 count += 1;
             }
         }
@@ -67,31 +67,33 @@ impl TcpSegmenter {
     }
     pub fn find(&self, other: &TcpInfoTuple) -> Option<usize> {
         let mut index = 0;
+        let mut ret = None;
         for v in &self.state {
-            if v.is_some() && v.as_ref().unwrap() == other {
-                return Some(index);
+            if v.is_some() && v.as_ref().unwrap() == other{
+                ret = Some(index);
             }
-            if v.is_some() && v.as_ref().unwrap() == &other.swap() {
-                return Some(index);
+            if v.is_some() && v.as_ref().unwrap() == &other.swap(){
+                ret = Some(index);
             }
             index += 1;
         }
-        None
+        ret
     }
     pub fn add(&mut self, other: &TcpInfoTuple) {
         if other.finrst {
             // find and close
             if let Some(found) = self.find(&other) {
                 let vmut = self.state.get_mut(found).unwrap();
-                *vmut = None;
+                *vmut = vmut.clone().unwrap().closed().into()
             } else {
                 // closing an already closed stream should be okay
             }
             return;
         }
-        if !self.find(&other.closed()).is_some() && !self.find(&other.swap()).is_some() && other.syn
+        // if !self.find(&other.closed()).is_some() && !self.find(&other.swap()).is_some() && other.syn
+        if other.syn && other.ack
         {
-            self.state.push(Some(other.closed()));
+            self.state.push(Some(other.clone()));
         }
     }
 }
@@ -135,7 +137,7 @@ mod tests {
             dsocket: SocketAddrV4::new([10, 0, 0, 1].into(), 52000),
             syn: true,
             finrst: false,
-            ack: false,
+            ack: true,
         };
         segmenter += TcpInfoTuple {
             ssocket: SocketAddrV4::new([10, 0, 0, 1].into(), 52000),
@@ -169,7 +171,7 @@ mod tests {
             dsocket: SocketAddrV4::new([10, 0, 0, 1].into(), 52000),
             syn: true,
             finrst: false,
-            ack: false,
+            ack: true,
         };
         let second = TcpInfoTuple {
             ssocket: SocketAddrV4::new([10, 0, 0, 1].into(), 52000),
@@ -204,21 +206,22 @@ mod tests {
             ack: false,
         };
         let closed = first.closed();
-        segmenter += first.synned();
+        segmenter += first.synacked();
         segmenter += first.swap().clone();
         segmenter += first.clone();
         segmenter += first.swap().clone();
         segmenter += first.clone();
         segmenter += first.swap().clone();
-        segmenter += closed;
+        segmenter += closed.clone();
+        assert_eq!(segmenter.find(&closed), Some(0));
         let second = TcpInfoTuple {
             ssocket: SocketAddrV4::new([10, 0, 0, 1].into(), 52000),
             dsocket: SocketAddrV4::new([192, 168, 1, 1].into(), 4000),
-            syn: true,
+            syn: false,
             finrst: false,
             ack: false,
         };
-        segmenter += second.clone();
+        segmenter += second.synacked();
         // new stream
         assert_eq!(segmenter.find(&second), Some(1));
     }
