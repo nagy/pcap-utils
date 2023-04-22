@@ -323,9 +323,9 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         segmenter.add(&TcpInfoTuple {
             ssocket: SocketAddrV4::new(saddr.into(), sport),
             dsocket: SocketAddrV4::new(daddr.into(), dport),
-            syn: syn,
-            finrst: finrst,
-            ack: ack,
+            syn,
+            finrst,
+            ack,
         });
     }
     Ok(())

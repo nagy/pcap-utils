@@ -47,7 +47,7 @@ impl PartialEq for TcpInfoTuple {
 
 #[derive(Default, Debug, PartialEq)]
 pub struct TcpSegmenter {
-    state: Vec<Option<TcpInfoTuple>>,
+    state: Vec<TcpInfoTuple>,
 }
 
 impl TcpSegmenter {
@@ -59,41 +59,37 @@ impl TcpSegmenter {
     pub fn num_open(&self) -> usize {
         let mut count = 0;
         for v in &self.state {
-            if !v.as_ref().unwrap().finrst {
+            if !v.finrst {
                 count += 1;
             }
         }
         count
     }
     pub fn find(&self, other: &TcpInfoTuple) -> Option<usize> {
-        let mut index = 0;
         let mut ret = None;
-        for v in &self.state {
-            if v.is_some() && v.as_ref().unwrap() == other{
+        for (index, v) in self.state.iter().enumerate() {
+            if v == other {
                 ret = Some(index);
             }
-            if v.is_some() && v.as_ref().unwrap() == &other.swap(){
+            if v == &other.swap() {
                 ret = Some(index);
             }
-            index += 1;
         }
         ret
     }
     pub fn add(&mut self, other: &TcpInfoTuple) {
         if other.finrst {
             // find and close
-            if let Some(found) = self.find(&other) {
+            if let Some(found) = self.find(other) {
                 let vmut = self.state.get_mut(found).unwrap();
-                *vmut = vmut.clone().unwrap().closed().into()
+                *vmut = vmut.closed()
             } else {
                 // closing an already closed stream should be okay
             }
             return;
         }
-        // if !self.find(&other.closed()).is_some() && !self.find(&other.swap()).is_some() && other.syn
-        if other.syn && other.ack
-        {
-            self.state.push(Some(other.clone()));
+        if other.syn && other.ack {
+            self.state.push(other.clone());
         }
     }
 }
