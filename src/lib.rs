@@ -238,6 +238,14 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         crate::packet_destination_addr(data).map(|x| x.to_string())
     }
     #[pyfn(m)]
+    fn packet_source_addr_octets(data: &[u8]) -> Option<[u8; 4]> {
+        crate::packet_source_addr(data).map(|x| x.octets())
+    }
+    #[pyfn(m)]
+    fn packet_destination_addr_octets(data: &[u8]) -> Option<[u8; 4]> {
+        crate::packet_destination_addr(data).map(|x| x.octets())
+    }
+    #[pyfn(m)]
     fn packet_tcp_ack(data: &[u8]) -> Option<bool> {
         crate::packet_tcp_ack(data)
     }
