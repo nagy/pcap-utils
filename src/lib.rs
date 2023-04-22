@@ -3,7 +3,10 @@ use pcap::{Capture, Offline, Packet, PacketIter};
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use pyo3::types::PyCapsule;
 use pyo3::Python;
+use std::net::SocketAddrV4;
+mod tcp;
 
 /// Represents an owned packet
 #[derive(Debug, Clone, PartialEq)]
@@ -129,6 +132,13 @@ fn packet_destination_port(data: &[u8]) -> Option<u16> {
     }
 }
 
+fn packet_tcp_ack(data: &[u8]) -> Option<bool> {
+    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+        TransportSlice::Tcp(ref hdr) => hdr.ack().into(),
+        _ => None,
+    }
+}
+
 fn packet_tcp_syn(data: &[u8]) -> Option<bool> {
     match SlicedPacket::from_ethernet(data).ok()?.transport? {
         TransportSlice::Tcp(ref hdr) => hdr.syn().into(),
@@ -228,6 +238,10 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         crate::packet_destination_addr(data).map(|x| x.to_string())
     }
     #[pyfn(m)]
+    fn packet_tcp_ack(data: &[u8]) -> Option<bool> {
+        crate::packet_tcp_ack(data)
+    }
+    #[pyfn(m)]
     fn packet_tcp_syn(data: &[u8]) -> Option<bool> {
         crate::packet_tcp_syn(data)
     }
@@ -250,6 +264,61 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     #[pyfn(m)]
     fn packet_is_icmp(data: &[u8]) -> bool {
         crate::packet_is_icmp(data)
+    }
+
+    use crate::tcp::*;
+
+    #[pyfn(m)]
+    fn tcp_find(
+        segmenter: &PyCapsule,
+        saddr: [u8; 4],
+        sport: u16,
+        daddr: [u8; 4],
+        dport: u16,
+    ) -> Option<usize> {
+        use crate::tcp::*;
+        let segmenter: &std::sync::Mutex<TcpSegmenter> = unsafe { segmenter.reference() };
+        let segmenter = segmenter.lock().unwrap();
+        segmenter.find(&TcpInfoTuple {
+            ssocket: SocketAddrV4::new(saddr.into(), sport),
+            dsocket: SocketAddrV4::new(daddr.into(), dport),
+            syn: false,
+            finrst: false,
+            ack: false,
+        })
+    }
+
+    #[pyfn(m)]
+    fn tcp_make(py: Python) -> PyResult<&PyCapsule> {
+        PyCapsule::new(
+            py,
+            std::sync::Mutex::new(TcpSegmenter::default()),
+            std::ffi::CString::new("tcp-segmenter".to_owned())
+                .unwrap()
+                .into(),
+        )
+    }
+
+    #[pyfn(m)]
+    fn tcp_add(
+        segmenter: &PyCapsule,
+        saddr: [u8; 4],
+        sport: u16,
+        daddr: [u8; 4],
+        dport: u16,
+        syn: bool,
+        finrst: bool,
+        ack: bool,
+    ) {
+        let segmenter: &std::sync::Mutex<TcpSegmenter> = unsafe { segmenter.reference() };
+        let mut segmenter = segmenter.lock().unwrap();
+        segmenter.add(&TcpInfoTuple {
+            ssocket: SocketAddrV4::new(saddr.into(), sport),
+            dsocket: SocketAddrV4::new(daddr.into(), dport),
+            syn: syn,
+            finrst: finrst,
+            ack: ack,
+        });
     }
     Ok(())
 }
