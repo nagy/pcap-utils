@@ -53,15 +53,15 @@ impl MyIterator {
 }
 
 fn nth_packet_raw(input: String, nth: usize) -> Option<Vec<u8>> {
-    let capture = Capture::from_file(input).unwrap();
-    let mut iter = capture.iter(Codec());
-    iter.nth(nth).map(|pkt| pkt.unwrap().data)
+    Capture::from_file(input)
+        .unwrap()
+        .iter(Codec())
+        .nth(nth)
+        .map(|pkt| pkt.unwrap().data)
 }
 
 fn nth_packet_payload(input: String, nth: usize) -> Option<Vec<u8>> {
-    let capture = Capture::from_file(input).unwrap();
-    let mut iter = capture.iter(Codec());
-    iter.nth(nth).map(|pkt| pkt.unwrap().data).map(|data| {
+    nth_packet_raw(input, nth).map(|data| {
         SlicedPacket::from_ethernet(&data)
             .unwrap()
             .payload
@@ -264,6 +264,9 @@ mod tests {
     fn parse_raw() {
         let data = &nth_packet_raw(format!("{}/test/captures/http.pcap", WIRESHARK), 0).unwrap();
         assert_eq!(data.len(), 207);
+        let payload =
+            &nth_packet_payload(format!("{}/test/captures/http.pcap", WIRESHARK), 0).unwrap();
+        assert_eq!(payload.len(), 153);
         let sport = packet_source_port(data).unwrap();
         assert_eq!(sport, 3267);
         let dport = packet_destination_port(data).unwrap();
