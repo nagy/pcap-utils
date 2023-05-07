@@ -211,7 +211,7 @@ fn packet_is_icmp_echo_response(data: &[u8]) -> bool {
 }
 
 /// Write out the resulting pcap file.
-fn write_function(input: String, output: String, list_of_keep: Vec<bool>) {
+fn write_pcap(input: String, output: String, list_of_keep: Vec<bool>) {
     let mut cap = Capture::from_file(input).unwrap();
     let mut save = cap.savefile(output).unwrap();
     for b in list_of_keep {
@@ -238,8 +238,9 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         crate::nth_packet_payload(input, nth).map(|x| PyBytes::new(py, &x))
     }
     #[pyfn(m)]
-    fn write_function(input: String, output: String, list_of_keep: Vec<bool>) {
-        crate::write_function(input, output, list_of_keep)
+    /// Write out the resulting pcap file.
+    fn write_pcap(input: String, output: String, list_of_keep: Vec<bool>) {
+        crate::write_pcap(input, output, list_of_keep)
     }
     #[pyfn(m)]
     fn packet_source_socket(data: &[u8]) -> Option<String> {
