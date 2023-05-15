@@ -210,6 +210,20 @@ fn packet_is_icmp_echo_response(data: &[u8]) -> bool {
     }
 }
 
+fn packet_is_icmp_destination_unreachable(data: &[u8]) -> bool {
+    match SlicedPacket::from_ethernet(data).unwrap().transport {
+        Some(TransportSlice::Icmpv4(ref hdr)) => match hdr.icmp_type() {
+            Icmpv4Type::DestinationUnreachable(_ihdr) => true,
+            _ => false,
+        },
+        Some(TransportSlice::Icmpv6(ref hdr)) => match hdr.icmp_type() {
+            Icmpv6Type::DestinationUnreachable(_ihdr) => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 /// Write out the resulting pcap file.
 fn write_pcap(input: String, output: String, list_of_keep: Vec<bool>) {
     let mut cap = Capture::from_file(input).unwrap();
@@ -309,6 +323,10 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     #[pyfn(m)]
     fn packet_is_icmp_echo_response(data: &[u8]) -> bool {
         crate::packet_is_icmp_echo_response(data)
+    }
+    #[pyfn(m)]
+    fn packet_is_icmp_destination_unreachable(data: &[u8]) -> bool {
+        crate::packet_is_icmp_destination_unreachable(data)
     }
 
     use crate::tcp::*;
