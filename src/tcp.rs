@@ -29,13 +29,13 @@ impl TcpInfoTuple {
         }
     }
     #[cfg(test)]
-    fn synacked(&self) -> Self {
+    fn syned(&self) -> Self {
         Self {
             ssocket: self.ssocket,
             dsocket: self.dsocket,
             syn: true,
             finrst: self.finrst,
-            ack: true,
+            ack: self.ack,
         }
     }
 }
@@ -88,7 +88,7 @@ impl TcpSegmenter {
             }
             return;
         }
-        if other.syn && other.ack {
+        if other.syn && !other.ack {
             self.state.push(other.clone());
         }
     }
@@ -202,7 +202,7 @@ mod tests {
             ack: false,
         };
         let closed = first.closed();
-        segmenter += first.synacked();
+        segmenter += first.syned();
         segmenter += first.swap().clone();
         segmenter += first.clone();
         segmenter += first.swap().clone();
@@ -217,7 +217,7 @@ mod tests {
             finrst: false,
             ack: false,
         };
-        segmenter += second.synacked();
+        segmenter += second.syned();
         // new stream
         assert_eq!(segmenter.find(&second), Some(1));
     }
