@@ -15,7 +15,7 @@ pub struct PacketOwned {
     pub data: Vec<u8>,
 }
 
-/// Simple codec that tranform [`pcap::Packet`] into [`PacketOwned`]
+/// Simple codec that transforms [`pcap::Packet`] into [`PacketOwned`]
 pub struct Codec();
 
 impl pcap::PacketCodec for Codec {
