@@ -1,8 +1,8 @@
 use etherparse::{
-    icmpv4::DestUnreachableHeader, Icmpv4Type, Icmpv6Type, InternetSlice, SlicedPacket,
+    icmpv4::DestUnreachableHeader, Icmpv4Type, Icmpv6Type, InternetSlice, ReadError, SlicedPacket,
     TransportSlice,
 };
-use pcap::{Capture, Offline, Packet, PacketIter};
+use pcap::{Capture, Linktype, Offline, Packet, PacketIter};
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -35,6 +35,7 @@ impl pcap::PacketCodec for Codec {
 #[pyclass]
 struct MyIterator {
     iter: PacketIter<Offline, Codec>,
+    linktype: Linktype,
 }
 
 #[pymethods]
@@ -43,18 +44,31 @@ impl MyIterator {
     fn new(input: String) -> PyResult<Self> {
         let capture = Capture::from_file(input)
             .map_err(|x| PyErr::new::<PyException, _>(format!("{}", x)))?;
+        let linktype = capture.get_datalink().clone();
         Ok(Self {
             iter: capture.iter(Codec()),
+            linktype: linktype,
         })
     }
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
-    fn __next__<'a>(mut slf: PyRefMut<'a, Self>, py: Python<'a>) -> Option<(&'a PyBytes, f64)> {
+    fn __next__<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        py: Python<'a>,
+    ) -> Option<(&'a PyBytes, f64, i32)> {
         slf.iter.next().map(|pkt| {
             let pkt = pkt.unwrap();
-            (PyBytes::new(py, &pkt.data), pkt.time)
+            (PyBytes::new(py, &pkt.data), pkt.time, slf.linktype.0)
         })
+    }
+}
+
+fn try_parse(data: &[u8], linktype: Linktype) -> Result<SlicedPacket<'_>, ReadError> {
+    if linktype == Linktype::IPV4 {
+        SlicedPacket::from_ip(data)
+    } else {
+        SlicedPacket::from_ethernet(data)
     }
 }
 
@@ -68,15 +82,15 @@ fn nth_packet_raw(input: String, nth: usize) -> Option<Vec<u8>> {
 
 fn nth_packet_payload(input: String, nth: usize) -> Option<Vec<u8>> {
     nth_packet_raw(input, nth).map(|data| {
-        SlicedPacket::from_ethernet(&data)
+        try_parse(&data, Linktype::ETHERNET)
             .unwrap()
             .payload
             .to_owned()
     })
 }
 
-fn packet_source_socket(data: &[u8]) -> Option<std::net::SocketAddr> {
-    let parsed = SlicedPacket::from_ethernet(data).ok()?;
+fn packet_source_socket(data: &[u8], linktype: Linktype) -> Option<std::net::SocketAddr> {
+    let parsed = try_parse(data, linktype).ok()?;
     let addr: std::net::IpAddr = match parsed.ip? {
         InternetSlice::Ipv4(ref hdr, _) => hdr.source_addr().into(),
         InternetSlice::Ipv6(ref hdr, _) => hdr.source_addr().into(),
@@ -89,8 +103,8 @@ fn packet_source_socket(data: &[u8]) -> Option<std::net::SocketAddr> {
     Some(std::net::SocketAddr::new(addr, port))
 }
 
-fn packet_destination_socket(data: &[u8]) -> Option<std::net::SocketAddr> {
-    let parsed = SlicedPacket::from_ethernet(data).ok()?;
+fn packet_destination_socket(data: &[u8], linktype: Linktype) -> Option<std::net::SocketAddr> {
+    let parsed = try_parse(data, linktype).ok()?;
     let addr: std::net::IpAddr = match parsed.ip? {
         InternetSlice::Ipv4(ref hdr, _) => hdr.destination_addr().into(),
         InternetSlice::Ipv6(ref hdr, _) => hdr.destination_addr().into(),
@@ -103,90 +117,90 @@ fn packet_destination_socket(data: &[u8]) -> Option<std::net::SocketAddr> {
     Some(std::net::SocketAddr::new(addr, port))
 }
 
-fn packet_source_addr(data: &[u8]) -> Option<std::net::Ipv4Addr> {
-    match SlicedPacket::from_ethernet(data).unwrap().ip {
+fn packet_source_addr(data: &[u8], linktype: Linktype) -> Option<std::net::Ipv4Addr> {
+    match try_parse(data, linktype).unwrap().ip {
         Some(InternetSlice::Ipv4(ref hdr, _)) => Some(hdr.source_addr()),
         Some(InternetSlice::Ipv6(ref _hdr, _)) => Default::default(),
         _ => Default::default(),
     }
 }
 
-fn packet_destination_addr(data: &[u8]) -> Option<std::net::Ipv4Addr> {
-    match SlicedPacket::from_ethernet(data).unwrap().ip {
+fn packet_destination_addr(data: &[u8], linktype: Linktype) -> Option<std::net::Ipv4Addr> {
+    match try_parse(data, linktype).unwrap().ip {
         Some(InternetSlice::Ipv4(ref hdr, _)) => Some(hdr.destination_addr()),
         Some(InternetSlice::Ipv6(ref _hdr, _)) => Default::default(),
         _ => Default::default(),
     }
 }
 
-fn packet_source_port(data: &[u8]) -> Option<u16> {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_source_port(data: &[u8], linktype: Linktype) -> Option<u16> {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Tcp(ref hdr)) => Some(hdr.source_port()),
         Some(TransportSlice::Udp(ref hdr)) => Some(hdr.source_port()),
         _ => None,
     }
 }
 
-fn packet_destination_port(data: &[u8]) -> Option<u16> {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_destination_port(data: &[u8], linktype: Linktype) -> Option<u16> {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Tcp(ref hdr)) => Some(hdr.destination_port()),
         Some(TransportSlice::Udp(ref hdr)) => Some(hdr.destination_port()),
         _ => None,
     }
 }
 
-fn packet_tcp_ack(data: &[u8]) -> Option<bool> {
-    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+fn packet_tcp_ack(data: &[u8], linktype: Linktype) -> Option<bool> {
+    match try_parse(data, linktype).ok()?.transport? {
         TransportSlice::Tcp(ref hdr) => hdr.ack().into(),
         _ => None,
     }
 }
 
-fn packet_tcp_syn(data: &[u8]) -> Option<bool> {
-    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+fn packet_tcp_syn(data: &[u8], linktype: Linktype) -> Option<bool> {
+    match try_parse(data, linktype).ok()?.transport? {
         TransportSlice::Tcp(ref hdr) => hdr.syn().into(),
         _ => None,
     }
 }
 
-fn packet_tcp_fin(data: &[u8]) -> Option<bool> {
-    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+fn packet_tcp_fin(data: &[u8], linktype: Linktype) -> Option<bool> {
+    match try_parse(data, linktype).ok()?.transport? {
         TransportSlice::Tcp(ref hdr) => hdr.fin().into(),
         _ => None,
     }
 }
 
-fn packet_tcp_rst(data: &[u8]) -> Option<bool> {
-    match SlicedPacket::from_ethernet(data).ok()?.transport? {
+fn packet_tcp_rst(data: &[u8], linktype: Linktype) -> Option<bool> {
+    match try_parse(data, linktype).ok()?.transport? {
         TransportSlice::Tcp(ref hdr) => hdr.rst().into(),
         _ => None,
     }
 }
 
-fn packet_is_tcp(data: &[u8]) -> bool {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_is_tcp(data: &[u8], linktype: Linktype) -> bool {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Tcp(ref _hdr)) => true,
         _ => false,
     }
 }
 
-fn packet_is_udp(data: &[u8]) -> bool {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_is_udp(data: &[u8], linktype: Linktype) -> bool {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Udp(ref _hdr)) => true,
         _ => false,
     }
 }
 
-fn packet_is_icmp(data: &[u8]) -> bool {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_is_icmp(data: &[u8], linktype: Linktype) -> bool {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Icmpv4(ref _hdr)) => true,
         Some(TransportSlice::Icmpv6(ref _hdr)) => true,
         _ => false,
     }
 }
 
-fn packet_is_icmp_echo_request(data: &[u8]) -> bool {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_is_icmp_echo_request(data: &[u8], linktype: Linktype) -> bool {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Icmpv4(ref hdr)) => match hdr.icmp_type() {
             Icmpv4Type::EchoRequest(_ihdr) => true,
             _ => false,
@@ -199,8 +213,8 @@ fn packet_is_icmp_echo_request(data: &[u8]) -> bool {
     }
 }
 
-fn packet_is_icmp_echo_response(data: &[u8]) -> bool {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_is_icmp_echo_response(data: &[u8], linktype: Linktype) -> bool {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Icmpv4(ref hdr)) => match hdr.icmp_type() {
             Icmpv4Type::EchoReply(_ihdr) => true,
             _ => false,
@@ -213,8 +227,8 @@ fn packet_is_icmp_echo_response(data: &[u8]) -> bool {
     }
 }
 
-fn packet_is_icmp_destination_unreachable(data: &[u8]) -> bool {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_is_icmp_destination_unreachable(data: &[u8], linktype: Linktype) -> bool {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Icmpv4(ref hdr)) => match hdr.icmp_type() {
             Icmpv4Type::DestinationUnreachable(_ihdr) => true,
             _ => false,
@@ -227,8 +241,8 @@ fn packet_is_icmp_destination_unreachable(data: &[u8]) -> bool {
     }
 }
 
-fn packet_icmp_destination_unreachable_port(data: &[u8]) -> Option<u16> {
-    match SlicedPacket::from_ethernet(data).unwrap().transport {
+fn packet_icmp_destination_unreachable_port(data: &[u8], linktype: Linktype) -> Option<u16> {
+    match try_parse(data, linktype).unwrap().transport {
         Some(TransportSlice::Icmpv4(ref hdr)) => match hdr.icmp_type() {
             Icmpv4Type::DestinationUnreachable(ihdr) => match ihdr {
                 DestUnreachableHeader::Port => {
@@ -280,80 +294,80 @@ fn pcap_utils(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
         crate::write_pcap(input, output, list_of_keep)
     }
     #[pyfn(m)]
-    fn packet_source_socket(data: &[u8]) -> Option<String> {
-        crate::packet_source_socket(data).map(|x| x.to_string())
+    fn packet_source_socket(data: &[u8], linktype: i32) -> Option<String> {
+        crate::packet_source_socket(data, Linktype(linktype)).map(|x| x.to_string())
     }
     #[pyfn(m)]
-    fn packet_destination_socket(data: &[u8]) -> Option<String> {
-        crate::packet_destination_socket(data).map(|x| x.to_string())
+    fn packet_destination_socket(data: &[u8], linktype: i32) -> Option<String> {
+        crate::packet_destination_socket(data, Linktype(linktype)).map(|x| x.to_string())
     }
     #[pyfn(m)]
-    fn packet_source_port(data: &[u8]) -> Option<u16> {
-        crate::packet_source_port(data)
+    fn packet_source_port(data: &[u8], linktype: i32) -> Option<u16> {
+        crate::packet_source_port(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_destination_port(data: &[u8]) -> Option<u16> {
-        crate::packet_destination_port(data)
+    fn packet_destination_port(data: &[u8], linktype: i32) -> Option<u16> {
+        crate::packet_destination_port(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_source_addr(data: &[u8]) -> Option<String> {
-        crate::packet_source_addr(data).map(|x| x.to_string())
+    fn packet_source_addr(data: &[u8], linktype: i32) -> Option<String> {
+        crate::packet_source_addr(data, Linktype(linktype)).map(|x| x.to_string())
     }
     #[pyfn(m)]
-    fn packet_destination_addr(data: &[u8]) -> Option<String> {
-        crate::packet_destination_addr(data).map(|x| x.to_string())
+    fn packet_destination_addr(data: &[u8], linktype: i32) -> Option<String> {
+        crate::packet_destination_addr(data, Linktype(linktype)).map(|x| x.to_string())
     }
     #[pyfn(m)]
-    fn packet_source_addr_octets(data: &[u8]) -> Option<[u8; 4]> {
-        crate::packet_source_addr(data).map(|x| x.octets())
+    fn packet_source_addr_octets(data: &[u8], linktype: i32) -> Option<[u8; 4]> {
+        crate::packet_source_addr(data, Linktype(linktype)).map(|x| x.octets())
     }
     #[pyfn(m)]
-    fn packet_destination_addr_octets(data: &[u8]) -> Option<[u8; 4]> {
-        crate::packet_destination_addr(data).map(|x| x.octets())
+    fn packet_destination_addr_octets(data: &[u8], linktype: i32) -> Option<[u8; 4]> {
+        crate::packet_destination_addr(data, Linktype(linktype)).map(|x| x.octets())
     }
     #[pyfn(m)]
-    fn packet_tcp_ack(data: &[u8]) -> Option<bool> {
-        crate::packet_tcp_ack(data)
+    fn packet_tcp_ack(data: &[u8], linktype: i32) -> Option<bool> {
+        crate::packet_tcp_ack(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_tcp_syn(data: &[u8]) -> Option<bool> {
-        crate::packet_tcp_syn(data)
+    fn packet_tcp_syn(data: &[u8], linktype: i32) -> Option<bool> {
+        crate::packet_tcp_syn(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_tcp_fin(data: &[u8]) -> Option<bool> {
-        crate::packet_tcp_fin(data)
+    fn packet_tcp_fin(data: &[u8], linktype: i32) -> Option<bool> {
+        crate::packet_tcp_fin(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_tcp_rst(data: &[u8]) -> Option<bool> {
-        crate::packet_tcp_rst(data)
+    fn packet_tcp_rst(data: &[u8], linktype: i32) -> Option<bool> {
+        crate::packet_tcp_rst(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_is_tcp(data: &[u8]) -> bool {
-        crate::packet_is_tcp(data)
+    fn packet_is_tcp(data: &[u8], linktype: i32) -> bool {
+        crate::packet_is_tcp(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_is_udp(data: &[u8]) -> bool {
-        crate::packet_is_udp(data)
+    fn packet_is_udp(data: &[u8], linktype: i32) -> bool {
+        crate::packet_is_udp(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_is_icmp(data: &[u8]) -> bool {
-        crate::packet_is_icmp(data)
+    fn packet_is_icmp(data: &[u8], linktype: i32) -> bool {
+        crate::packet_is_icmp(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_is_icmp_echo_request(data: &[u8]) -> bool {
-        crate::packet_is_icmp_echo_request(data)
+    fn packet_is_icmp_echo_request(data: &[u8], linktype: i32) -> bool {
+        crate::packet_is_icmp_echo_request(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_is_icmp_echo_response(data: &[u8]) -> bool {
-        crate::packet_is_icmp_echo_response(data)
+    fn packet_is_icmp_echo_response(data: &[u8], linktype: i32) -> bool {
+        crate::packet_is_icmp_echo_response(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_is_icmp_destination_unreachable(data: &[u8]) -> bool {
-        crate::packet_is_icmp_destination_unreachable(data)
+    fn packet_is_icmp_destination_unreachable(data: &[u8], linktype: i32) -> bool {
+        crate::packet_is_icmp_destination_unreachable(data, Linktype(linktype))
     }
     #[pyfn(m)]
-    fn packet_icmp_destination_unreachable_port(data: &[u8]) -> Option<u16> {
-        crate::packet_icmp_destination_unreachable_port(data)
+    fn packet_icmp_destination_unreachable_port(data: &[u8], linktype: i32) -> Option<u16> {
+        crate::packet_icmp_destination_unreachable_port(data, Linktype(linktype))
     }
 
     use crate::tcp::*;
